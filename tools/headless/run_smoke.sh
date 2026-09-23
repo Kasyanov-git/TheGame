@@ -32,8 +32,8 @@ cp -r "$ROOT/src" "$ROOT/tests" "$ROOT/project.godot" "$ROOT/icon.svg" proj/
 sed -i 's|run/main_scene="res://src/main/main.tscn"|run/main_scene="res://tests/smoke.tscn"|' proj/project.godot
 # strip user-class type annotations in the COPY (see note above)
 find proj -name '*.gd' -print0 | xargs -0 sed -i -E \
-  -e 's/ as (ArcadeVehicle|BowlArena|DebugHud|ChaseCameraRig)//g' \
-  -e 's/: (ArcadeVehicle|BowlArena|DebugHud|ChaseCameraRig)\b//g' \
+  -e 's/ as (ArcadeVehicle|BowlArena|DebugHud|ChaseCameraRig|BaseWeapon|Projectile|PickupBase|TurretAimer|HealthComponent|ExplosionPlaceholder|ImpactFxPlaceholder|TracerPlaceholder)//g' \
+  -e 's/: (ArcadeVehicle|BowlArena|DebugHud|ChaseCameraRig|BaseWeapon|Projectile|PickupBase|TurretAimer|HealthComponent|ExplosionPlaceholder|ImpactFxPlaceholder|TracerPlaceholder)\b//g' \
   -e 's/:=/=/g'
-GODOT_PROJECT="$WORK/proj" NPM_ROOT="$WORK" FRAMES=4000 \
+GODOT_PROJECT="$WORK/proj" NPM_ROOT="$WORK" FRAMES=6000 \
   node --no-warnings "$ROOT/tools/headless/godot-wasm-runner.mjs"

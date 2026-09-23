@@ -1,0 +1,41 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/combat/base_weapon.gd" id="1_wpn"]
+
+[sub_resource type="StandardMaterial3D" id="mat_gun"]
+albedo_color = Color(0.16, 0.18, 0.22, 1)
+metallic = 0.5
+roughness = 0.4
+
+[sub_resource type="BoxMesh" id="mesh_gun_body"]
+material = SubResource("mat_gun")
+size = Vector3(0.46, 0.34, 0.85)
+
+[sub_resource type="CylinderMesh" id="mesh_gun_barrel"]
+material = SubResource("mat_gun")
+top_radius = 0.09
+bottom_radius = 0.09
+height = 1.0
+radial_segments = 10
+
+[node name="WeaponCannon" type="Node3D"]
+script = ExtResource("1_wpn")
+
+[node name="Turret" type="Node3D" parent="."]
+position = Vector3(0, 0.12, 0)
+
+[node name="GunBody" type="MeshInstance3D" parent="Turret"]
+position = Vector3(0, 0, -0.1)
+mesh = SubResource("mesh_gun_body")
+cast_shadow = 0
+
+[node name="Barrel" type="Node3D" parent="Turret"]
+
+[node name="BarrelMesh" type="MeshInstance3D" parent="Turret/Barrel"]
+position = Vector3(0, 0, -0.62)
+rotation_degrees = Vector3(90, 0, 0)
+mesh = SubResource("mesh_gun_barrel")
+cast_shadow = 0
+
+[node name="Muzzle" type="Marker3D" parent="Turret/Barrel"]
+position = Vector3(0, 0, -1.15)

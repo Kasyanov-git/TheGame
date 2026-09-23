@@ -33,6 +33,8 @@ extends RigidBody3D
 
 signal landed(impact_speed: float)
 signal respawned
+signal killed(attacker_id: String)             ## Sprint 2: хук реплеев/статов
+signal weapon_mounted(weapon: Node)           ## Sprint 2: HUD/вешалка оружия
 
 const ARENA_LAYER := 1
 const _G := 9.80665
@@ -104,6 +106,8 @@ var is_on_wall := false
 var boost_active := false
 var speed_kmh := 0.0
 var boost_ratio := 1.0                     ## 0..1 (HUD)
+@export var unit_id := ""                  ## сетевой id (дефолт = имя ноды)
+var is_dead_emitted := false               ## защита от двойного killed()
 
 # ─────────────────────────── Внутреннее состояние ───────────────────────────
 var _steer := 0.0                          ## сглаженный ввод руля -1..1
@@ -113,6 +117,9 @@ var _wheel_spin := 0.0
 var _rays: Array[RayCast3D] = []
 var _susp: Array = []                      ## per-wheel {mount, hit, dist, comp, normal}
 var _hardpoints: Node3D = null
+var _health = null                         ## HealthComponent (узел "Health"), Variant — класс не импортируется
+var _weapons: Array = []                   ## BaseWeapon'ы на сокетах
+var _respawning := false                   ## пауза управления до респавна
 var _wheels_vis: Array[Node3D] = []
 var _wheel_yaws: Array[Node3D] = []
 var _max_comp := -10.0                     ## макс. компрессия за кадр (grounded-gate)
@@ -126,6 +133,44 @@ var _ext_active := false
 func _ready() -> void:
 	add_to_group("vehicles")
 	_collect_children()
+	if unit_id == "":
+		unit_id = String(name)
+	_health = get_node_or_null("Health")
+	if _health != null:
+		_health.connect("on_vehicle_destroyed", _on_destroyed)
+		_health.connect("revived", _on_revived)
+
+
+# ════════════════════════ Sprint 2: смерть / респавн ════════════════════════
+
+func _on_destroyed(_vehicle: Node, attacker_id: String) -> void:
+	_respawning = true
+	is_dead_emitted = true
+	killed.emit(attacker_id)
+
+
+func _on_revived() -> void:
+	is_dead_emitted = false
+
+
+func is_dead() -> bool:
+	return _health != null and _health.is_dead
+
+
+## Смерть уже случилась, респавн ещё нет (ввод заблокирован, тело скрыто).
+func is_respawning() -> bool:
+	return _respawning
+
+
+## Рандомная точка арены (ТЗ DoD 3: «респавнится на случайной точке спавна»).
+func respawn_random() -> void:
+	var spawn: Node3D = null
+	var arena = get_tree().get_first_node_in_group("arena_bowl")
+	if arena != null and arena.has_method("get_random_spawn_point"):
+		spawn = arena.get_random_spawn_point()
+	else:
+		spawn = _nearest_spawn()
+	respawn(spawn)
 
 
 func _collect_children() -> void:
@@ -176,6 +221,10 @@ func _read_input() -> Vector4:
 
 
 func _physics_process(delta: float) -> void:
+	if _respawning or is_dead():
+		# Sprint 2: смерть/респавн — ввод и движение заморожены (ТЗ DoD 3:
+		# «скрывается/блокирует ввод»). HP/таймер живут в HealthComponent.
+		return
 	var inp := _read_input()
 	var steer_in := inp.x
 	var throttle := clampf(inp.y, -1.0, 1.0)
@@ -326,11 +375,16 @@ func _update_boost_energy(delta: float) -> void:
 		_boost_energy = maxf(0.0, _boost_energy - boost_drain * delta)
 	elif grounded and not is_drifting:
 		_boost_energy = minf(boost_capacity, _boost_energy + boost_regen * delta)
-	# TODO Sprint 2: буст-пады на карте -> add_boost(+boost_pads_refill)
+	# Sprint 2 (готово): буст-пады на карте вызывают add_boost() (PickupBase)
 
 
 func add_boost(amount: float) -> void:
 	_boost_energy = clampf(_boost_energy + amount, 0.0, boost_capacity)
+
+
+## Чтение запаса для смежных систем (Sprint 2: оружие тратит буст-энергию).
+func get_boost_energy() -> float:
+	return _boost_energy
 
 
 # ════════════════════════ боковое сцепление ════════════════════════
@@ -445,6 +499,7 @@ func _clamp_speed(fwd: Vector3, delta: float) -> void:
 # ════════════════════════ спавн-поинты (заглушки DoD 4) ════════════════════════
 
 func respawn(spawn: Node3D = null) -> void:
+	_respawning = false
 	if spawn == null:
 		spawn = _nearest_spawn()
 	if spawn:
@@ -478,11 +533,48 @@ func _nearest_spawn() -> Node3D:
 	return best
 
 
-## Сокеты под оружие/тюнинг Sprint 2 (DoD 4).
+## Сокеты под оружие/тюнинг Sprint 2 (DoD 4). GunMountPoint — штатный сокет
+## пушки (позиция «крыло/крыша» по ТЗ); WeaponSocket_L/R/C — место под второй
+## ствол/тюнинг (гараж Sprint 4).
 func get_hardpoint(socket_name: String) -> Node3D:
 	if _hardpoints == null:
 		_hardpoints = get_node_or_null("Hardpoints") as Node3D
 	return _hardpoints.get_node_or_null(socket_name) if _hardpoints else null
+
+
+## ── Sprint 2: монтируемое оружие ──
+## Спавнит оружие из сцены и вешает его ДИТИМ узлом на сокет (ТЗ п.1).
+func mount_weapon(weapon: Node3D, socket_name: String = "GunMountPoint") -> bool:
+	if weapon == null:
+		return false
+	var socket := get_hardpoint(socket_name)
+	if socket == null:
+		push_warning("ArcadeVehicle: сокет '%s' не найден — оружие не смонтировано" % socket_name)
+		return false
+	weapon.set("vehicle", self)  # до add_child: _ready должен увидеть носителя
+	socket.add_child(weapon)
+	_weapons.append(weapon)
+	weapon_mounted.emit(weapon)
+	return true
+
+
+func get_weapons() -> Array:
+	return _weapons
+
+
+func get_health() -> Node:
+	return _health
+
+
+func get_unit_id() -> String:
+	return unit_id
+
+
+## Огонь извне (боты Sprint 3 / нет-команды) — форвард на все стволы.
+func set_external_fire(on: bool) -> void:
+	for w in _weapons:
+		if w != null and w.has_method("set_external_fire"):
+			w.set_external_fire(on)
 
 
 # ════════════════════════ визуал колёс (в _process — не дёргает физику) ════════════════════════
@@ -522,6 +614,10 @@ func get_net_state() -> Dictionary:
 		"v": [linear_velocity.x, linear_velocity.y, linear_velocity.z],
 		"b": _boost_energy,
 		"d": is_drifting,
+		# Sprint 2: боёвка (HP — авторитарно на сервере; тут — для реплея/ошибки)
+		"dead": is_dead(),
+		"hp": _health.current_health if _health != null else 0.0,
+		"w": [],  # TODO Sprint 3: [gun.get_net_state() for gun in _weapons]
 	}
 
 

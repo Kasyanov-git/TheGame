@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/combat/pickup_base.gd" id="1_pick"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_pick"]
+radius = 1.5
+height = 1.8
+
+[node name="Pickup" type="Area3D"]
+collision_layer = 16
+collision_mask = 2
+script = ExtResource("1_pick")
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.9, 0)
+shape = SubResource("CylinderShape3D_pick")

@@ -7,7 +7,8 @@
 Физика: GodotPhysics3D (raycast-подвеска, не `VehicleBody3D`) ·
 Мультиплеер (Sprint 3): Colyseus.js · Бэкенд сохранений (Sprint 4): SDK платформ.
 
-Репозиторий ведётся по спринтам из ТЗ. **Sprint 1 — готов и проверен.**
+Репозиторий ведётся по спринтам из ТЗ. **Sprint 1 и Sprint 2 — готовы** и проверены
+живым смоук-прогоном на wasm-движке (`SMOKE: PASS`, 52 проверки).
 
 ---
 
@@ -119,15 +120,23 @@ src/
                                   Visual (шасси/кабина/колёса), Hardpoints
   camera/chase_camera.gd        — риг: SpringArm3D + Camera3D
   camera/camera_rig.tscn
-  ui/debug_hud.(gd|tscn)        — скорость/буст/контакт/FPS
+  combat/                       — Sprint 2: бой и плюшки
+    turret_aimer.gd             — наведение в camera-ray (12 рад/с, pitch −10..+30)
+    base_weapon.gd              — параметры огня, 2 режима, ресурс (буст/патроны)
+    weapon_cannon.tscn / weapon_mg.tscn — пресеты (пушка=снаряды, MG=hitscan)
+    projectile.(gd|tscn)        — Area3D-снаряд 120 м/с + sweep-ray тик
+    health_component.gd         — HP/щит/смерть/респавн (сигналы для VFX/AUI)
+    pickup_base.(gd|tscn)       — Nitro/Repair/Shield, кулдаун 10 с
+    explosion/impact/tracer_placeholder.gd — vfx-заглушки (ForcePush в эксплоузе)
+  ui/debug_hud.(gd|tscn)        — скорость/буст/HP-бар/прицел/FPS
 tests/
-  smoke_driver.gd, smoke.tscn   — 13 проверок физики (см. выше)
+  smoke_driver.gd, smoke.tscn   — 52 проверки физики+боя (см. выше)
   run_smoke.sh-обёртка -> tools/headless/run_smoke.sh
 tools/headless/
   godot-wasm-runner.mjs         — Node-runner wasm-движка (browser-shims,
                                   frame-pump через GodotInstance.iteration)
   run_smoke.sh                  — вся подготовка (npm, staging, type-strip)
-docs/sprint1_report.md          — отчёт по спринту
+docs/sprint1_report.md, sprint2_report.md — отчёты по спринтам
 ```
 
 ### Ключевые параметры (все — `@export`, правятся в инспекторе)
@@ -158,12 +167,59 @@ docs/sprint1_report.md          — отчёт по спринту
 * **Сцена без ассетов** — процедурка + примитив-меши: быстрый web-бандл,
   никакой текстурной пайплайн-зависимости до арта Sprint 4.
 
+---
+
+## Sprint 2 — Combat & Perks (готово)
+
+> Цель спринта (ТЗ «Senior Gameplay Developer & Combat Systems Engineer»):
+> орудия на hardpoints с турельным наведением, снаряды/hitscan, HP-система с
+> респавном, подбираемые плюшки, сигнальные крючки VFX/AUI.
+
+### Что реализовано
+
+**Турельный монтаж и наведение** — оружие вешается дочерним узлом на сокет
+`GunMountPoint`/`WeaponSocket_L/R` (трансформ наследуется подвеской),
+`turret_aimer.gd` наводится **в точку camera-ray из центра экрана** с
+ограничением скорости башни `12 рад/с` (наведение не мгновенное — «вес
+орудия») и клампом питча **−10°…+30°**; oversized-«липкость» прицела к
+хитбоксам (< 12 м) — аркадный aim-assist.
+
+**BaseWeapon** — параметры из ТЗ (`fire_rate 0.15 с`, `damage 15`,
+`energy_cost 6` из шкалы буста, `spread 1.5°`), два режима: основной
+**Arcade Fast Projectile** (Area3D-снаряд `120 м/с`, триггер-сфера `r 0.9 м`,
+жизнь `3 с`, sweep-ray от туннелирования) и **hitscan** (пулемёт: мгновенный
+`intersect_ray` от дула, патроны `80 + реген 30/с`). Выстрел всегда идёт
+вдоль **фактического** ствола — инерция наводки влияет на упреждение.
+
+**HealthComponent** — модульный (машины и будущие разрушаемые объекты):
+`take_damage(amount, attacker_id)`, щит-поглощение, на смерти —
+`on_vehicle_destroyed`, freeze/скрытие/блокировка ввода, **explosion
+placeholder с ForcePush** соседних машин, `respawn_delay 4 с` → респавн на
+случайной точке генератора арены.
+
+**Pickups** — `Area3D`-триггеры с крутящейся иконкой и кулдауном `10 с`:
+**Nitro** (+100 % буста), **Repair** (+35 HP), **Shield** (6 с поглощения);
+5 точек на карте. **Сигналы VFX/AUI**: `health_changed`, `hit_registered(pos,
+damage, is_kill)`, `weapon_fired(muzzle, dir)` — HUD уже подписан, звук/
+партиклы подключаются без правок логики.
+
+### Как проверено
+
+`./tools/headless/run_smoke.sh` — 39 новых проверок DoD (каденция 4 выстрела
+за 30 тиков, интервал ~9 тиков, сход турели в прицел с ошибкой 0.05°, шаг
+поворота ровно на потолке 0.2 рад/тик, точный урон `damage*hits`, деактивация
+снаряда о стену/lifetime, смерть→взрыв→респавн на spawn point за 4 с, все 3
+типа плюшек + щит/абсорб/истечение). Подробности и найденные прогоном баги
+(`Basis.xform` удалён в 4.7; headless-viewport высотой 0; глобальные
+трансформы вне дерева) — **`docs/sprint2_report.md`**.
+
+---
+
 ### Дальше (по ТЗ)
 
-* **Sprint 2 — Combat & Perks**: снаряды по `WeaponSocket_*`, HP-валидация,
-  подбираемые плюшки (`add_boost()` уже ждёт буст-пады; `landed()/respawned()`
-  — крючки эффектов).
 * **Sprint 3 — Networking & Bots**: Colyseus-комната (state = `get_net_state()`),
-  боты = `set_external_input()` + FSM, заполнение слотов через 5–7 с.
+  авторитетный урон вместо `register_projectile_hit` напрямую, интерполяция
+  чужих турелей/снарядов, боты = `set_external_input()` + FSM по `hit_registered`.
 * **Sprint 4 — UI, Meta & SDK**: Platform Wrapper (Яндекс/ВК/Crazy/Telegram),
-  гараж на тех же hardpoints, rewarded-реклама, лидерборды.
+  garage на тех же hardpoints (скины орудий), rewarded-реклама, лидерборды.
+

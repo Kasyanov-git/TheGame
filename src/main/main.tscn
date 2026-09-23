@@ -1,10 +1,11 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://src/main/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://src/arena/arena_bowl.tscn" id="2_arena"]
 [ext_resource type="PackedScene" path="res://src/vehicle/player_car.tscn" id="3_car"]
 [ext_resource type="PackedScene" path="res://src/camera/camera_rig.tscn" id="4_cam"]
 [ext_resource type="PackedScene" path="res://src/ui/debug_hud.tscn" id="5_hud"]
+[ext_resource type="PackedScene" path="res://src/combat/pickup_base.tscn" id="6_pick"]
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
 sky_top_color = Color(0.14, 0.2, 0.32, 1)
@@ -41,5 +42,27 @@ position = Vector3(0, 2, 18)
 
 [node name="CameraRig" parent="." instance=ExtResource("4_cam")]
 vehicle = NodePath("../PlayerCar")
+
+[node name="Pickups" type="Node3D" parent="."]
+
+[node name="NitroNorth" parent="Pickups" instance=ExtResource("6_pick")]
+position = Vector3(0, 0, 27)
+type = 1
+
+[node name="NitroSouth" parent="Pickups" instance=ExtResource("6_pick")]
+position = Vector3(0, 0, -27)
+type = 1
+
+[node name="RepairWest" parent="Pickups" instance=ExtResource("6_pick")]
+position = Vector3(-26, 0, 0)
+type = 0
+
+[node name="RepairEast" parent="Pickups" instance=ExtResource("6_pick")]
+position = Vector3(26, 0, 0)
+type = 0
+
+[node name="ShieldCenter" parent="Pickups" instance=ExtResource("6_pick")]
+position = Vector3(0, 0, 0)
+type = 2
 
 [node name="DebugHUD" parent="." instance=ExtResource("5_hud")]

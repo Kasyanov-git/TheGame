@@ -78,6 +78,7 @@ var _rings: Array = []
 
 
 func _ready() -> void:
+	add_to_group("arena_bowl")  ## игровые системы (respaner, pickups) ищут арену без жёстких путей
 	_build()
 
 
@@ -350,6 +351,20 @@ func get_spawn_point(index: int) -> Node3D:
 	if holder == null or holder.get_child_count() == 0:
 		return null
 	return holder.get_child(index % holder.get_child_count()) as Node3D
+
+
+## Sprint 2 (ТЗ DoD 3): респавн после уничтожения — на СЛУЧАЙНУЮ точку.
+## exclude — не возвращать игрока на его же труп, если точки рядом.
+func get_random_spawn_point(exclude: Node3D = null) -> Node3D:
+	var holder := get_node_or_null("SpawnPoints")
+	if holder == null or holder.get_child_count() == 0:
+		return null
+	var c := holder.get_child_count()
+	for i in c:
+		var p := holder.get_child(randi() % c) as Node3D
+		if p != null and p != exclude:
+			return p
+	return holder.get_child(0) as Node3D
 
 
 func get_spawn_count() -> int:

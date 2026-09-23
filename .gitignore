@@ -1,19 +1,31 @@
 ```
-# Godot specific ignores
+# Godot-specific ignores
 *.import
+*.pid
+*.tmp
+*.log
 export_presets.cfg
-.user
-*.autosave*
+.godot/
 
 # Dependencies
-addons/
-.cache/
+node_modules/
 
-# Logs and temp files
-*.log
-*.tmp
+# TypeScript/JavaScript build artifacts
+dist/
+build/
+*.js.map
+*.tsbuildinfo
 
-# Editor
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db
 ```

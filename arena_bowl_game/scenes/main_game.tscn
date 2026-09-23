@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<scene type="Node3D" format="2">
+	<node name="MainGame" type="Node3D">
+		<node name="GameManager" type="Node" groups="autoload">
+			<script language="GDScript" resource_path="res://scripts/game_manager.gd">
+				<code>
+extends Node3D
+class_name GameManager
+
+## Main Game Manager - Sprint 1 MVP
+## Handles game state, vehicle spawning, and scene coordination
+
+@export var max_players: int = 4
+
+var vehicles: Array[Node3D] = []
+var current_arena: Node3D = null
+var game_state: GameState = GameState.LOBBY
+
+enum GameState {
+	LOBBY,
+	PLAYING,
+	PAUSED,
+	GAME_OVER
+}
+
+func _ready() -> void:
+	_setup_environment()
+	_setup_input_map()
+	load_arena()
+	spawn_player_vehicle(0)
+
+func _setup_environment() -> void:
+	var environment = WorldEnvironment.new()
+	environment.name = "WorldEnvironment"
+	add_child(environment)
+	
+	var env_resource = Environment.new()
+	env_resource.background_mode = Environment.BG_COLOR
+	env_resource.background_color = Color(0.15, 0.18, 0.22)
+	env_resource.ambient_light_enabled = true
+	env_resource.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env_resource.ambient_light_color = Color(0.4, 0.45, 0.5)
+	env_resource.ambient_light_energy = 0.6
+	env_resource.glow_enabled = true
+	env_resource.glow_intensity = 0.8
+	env_resource.ssao_enabled = true
+	environment.environment = env_resource
+	
+	var sun_light = DirectionalLight3D.new()
+	sun_light.name = "Sun"
+	sun_light.rotation_degrees = Vector3(-45, 45, 0)
+	sun_light.light_energy = 1.2
+	sun_light.shadow_enabled = true
+	add_child(sun_light)
+
+func load_arena() -> void:
+	current_arena = SeamlessBowlArena.new()
+	current_arena.name = "Arena"
+	add_child(current_arena)
+
+func spawn_player_vehicle(player_id: int, position: Vector3 = Vector3.ZERO) -> Node3D:
+	var vehicle_container = Node3D.new()
+	vehicle_container.name = "Player_%d" % player_id
+	
+	var vehicle_controller = ArcadeVehicleController.new()
+	vehicle_controller.name = "ArcadeVehicleController"
+	vehicle_container.add_child(vehicle_controller)
+	
+	var mesh_container = Node3D.new()
+	mesh_container.name = "MeshContainer"
+	vehicle_controller.add_child(mesh_container)
+	
+	var camera_pivot = Node3D.new()
+	camera_pivot.name = "CameraPivot"
+	vehicle_controller.add_child(camera_pivot)
+	
+	var camera = DynamicVehicleCamera.new()
+	camera.name = "GameCamera"
+	camera_pivot.add_child(camera)
+	
+	if position == Vector3.ZERO:
+		position = get_random_spawn_position()
+	
+	vehicle_controller.global_position = position
+	add_child(vehicle_container)
+	vehicles.append(vehicle_container)
+	
+	camera.set_vehicle_target(vehicle_controller)
+	if player_id == 0:
+		camera.current = true
+	
+	return vehicle_container
+
+func get_random_spawn_position() -> Vector3:
+	var angle = randf() * TAU
+	var radius = randf_range(0, 20)
+	return Vector3(cos(angle) * radius, 5, sin(angle) * radius)
+
+func start_game() -> void:
+	game_state = GameState.PLAYING
+</code>
+			</script>
+		</node>
+	</node>
+</scene>

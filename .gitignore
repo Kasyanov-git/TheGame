@@ -1,0 +1,19 @@
+```
+# Godot specific ignores
+*.import
+export_presets.cfg
+.user
+*.autosave*
+
+# Dependencies
+addons/
+.cache/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editor
+.vscode/
+.idea/
+```

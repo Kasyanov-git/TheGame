@@ -1,0 +1,11 @@
+# Godot 4 — кэш импорта/редактора (генерируется локально)
+.godot/
+
+# Экспорты (web-билды для Yandex Games / CrazyGames и т.п.)
+build/
+exports/
+
+# ОС/редакторы
+.DS_Store
+*.tmp
+.vscode/

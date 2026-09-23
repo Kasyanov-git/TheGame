@@ -1,0 +1,85 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/ui/debug_hud.gd" id="1_hud"]
+
+[node name="DebugHUD" type="Control"]
+process_mode = 3
+script = ExtResource("1_hud")
+vehicle_path = NodePath("../PlayerCar")
+
+[node name="SpeedLabel" type="Label" parent="."]
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -160.0
+offset_top = -118.0
+offset_right = 160.0
+offset_bottom = -58.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_font_sizes/font_size = 44
+text = "0 км/ч"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BoostBar" type="ProgressBar" parent="."]
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -40.0
+offset_right = 150.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 0
+show_percentage = false
+step = 0.1
+value = 100.0
+modulate = Color(0.35, 0.95, 1, 1)
+
+[node name="StatusLabel" type="Label" parent="."]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 460.0
+offset_bottom = 40.0
+theme_override_font_sizes/font_size = 18
+text = "GROUND"
+
+[node name="FpsLabel" type="Label" parent="."]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -160.0
+offset_top = 12.0
+offset_right = -16.0
+offset_bottom = 40.0
+grow_horizontal = 0
+theme_override_font_sizes/font_size = 18
+text = "FPS: 0"
+horizontal_alignment = 2
+
+[node name="HintLabel" type="Label" parent="."]
+offset_left = 16.0
+offset_top = 42.0
+offset_right = 620.0
+offset_bottom = 66.0
+theme_override_colors/font_color = Color(0.75, 0.8, 0.85, 0.75)
+theme_override_font_sizes/font_size = 15
+text = "WASD — газ/руль · Space — буст · Shift — дрифт · R — сброс"
+
+[node name="SprintLabel" type="Label" parent="."]
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -420.0
+offset_top = -40.0
+offset_right = -16.0
+offset_bottom = -12.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.5, 0.55, 0.6, 0.8)
+theme_override_font_sizes/font_size = 14
+text = "Sprint 1 — physics core · sprint 2: combat & perks"
+horizontal_alignment = 2

@@ -1,0 +1,137 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://src/vehicle/arcade_vehicle.gd" id="1_car"]
+
+[sub_resource type="BoxShape3D" id="shape_body"]
+size = Vector3(1.86, 0.5, 3.55)
+
+[sub_resource type="SphereShape3D" id="shape_skirt"]
+radius = 0.42
+
+[sub_resource type="StandardMaterial3D" id="mat_body"]
+albedo_color = Color(0.867, 0.357, 0.118, 1)
+metallic = 0.05
+roughness = 0.55
+
+[sub_resource type="StandardMaterial3D" id="mat_glass"]
+albedo_color = Color(0.4, 0.72, 0.9, 1)
+metallic = 0.3
+roughness = 0.25
+
+[sub_resource type="StandardMaterial3D" id="mat_dark"]
+albedo_color = Color(0.09, 0.1, 0.12, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="mesh_chassis"]
+material = SubResource("mat_body")
+size = Vector3(1.78, 0.44, 3.5)
+
+[sub_resource type="BoxMesh" id="mesh_cabin"]
+material = SubResource("mat_glass")
+size = Vector3(1.24, 0.42, 1.45)
+
+[sub_resource type="CylinderMesh" id="mesh_wheel"]
+material = SubResource("mat_dark")
+top_radius = 0.42
+bottom_radius = 0.42
+height = 0.3
+radial_segments = 14
+
+[node name="PlayerCar" type="RigidBody3D" groups=["player"]]
+collision_layer = 2
+collision_mask = 3
+mass = 6.0
+physics_interpolate = true
+linear_damp = 0.0
+angular_damp = 0.0
+script = ExtResource("1_car")
+
+[node name="CollisionBody" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.05, 0)
+shape = SubResource("shape_body")
+
+[node name="CollisionSkirt" type="CollisionShape3D" parent="."]
+position = Vector3(0, -0.3, 0)
+shape = SubResource("shape_skirt")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Chassis" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 0.08, 0)
+mesh = SubResource("mesh_chassis")
+
+[node name="Cabin" type="MeshInstance3D" parent="Visual"]
+position = Vector3(0, 0.42, -0.12)
+mesh = SubResource("mesh_cabin")
+
+[node name="WheelFL" type="Node3D" parent="Visual"]
+position = Vector3(-0.93, -0.13, -1.32)
+
+[node name="Steer" type="Node3D" parent="Visual/WheelFL"]
+
+[node name="Spin" type="Node3D" parent="Visual/WheelFL/Steer"]
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/WheelFL/Steer/Spin"]
+rotation_degrees = Vector3(0, 0, 90)
+mesh = SubResource("mesh_wheel")
+
+[node name="WheelFR" type="Node3D" parent="Visual"]
+position = Vector3(0.93, -0.13, -1.32)
+
+[node name="Steer" type="Node3D" parent="Visual/WheelFR"]
+
+[node name="Spin" type="Node3D" parent="Visual/WheelFR/Steer"]
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/WheelFR/Steer/Spin"]
+rotation_degrees = Vector3(0, 0, 90)
+mesh = SubResource("mesh_wheel")
+
+[node name="WheelRL" type="Node3D" parent="Visual"]
+position = Vector3(-0.93, -0.13, 1.32)
+
+[node name="Steer" type="Node3D" parent="Visual/WheelRL"]
+
+[node name="Spin" type="Node3D" parent="Visual/WheelRL/Steer"]
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/WheelRL/Steer/Spin"]
+rotation_degrees = Vector3(0, 0, 90)
+mesh = SubResource("mesh_wheel")
+
+[node name="WheelRR" type="Node3D" parent="Visual"]
+position = Vector3(0.93, -0.13, 1.32)
+
+[node name="Steer" type="Node3D" parent="Visual/WheelRR"]
+
+[node name="Spin" type="Node3D" parent="Visual/WheelRR/Steer"]
+
+[node name="Mesh" type="MeshInstance3D" parent="Visual/WheelRR/Steer/Spin"]
+rotation_degrees = Vector3(0, 0, 90)
+mesh = SubResource("mesh_wheel")
+
+[node name="Susp" type="Node3D" parent="."]
+
+[node name="SuspFL" type="RayCast3D" parent="Susp"]
+position = Vector3(-0.93, -0.25, -1.32)
+
+[node name="SuspFR" type="RayCast3D" parent="Susp"]
+position = Vector3(0.93, -0.25, -1.32)
+
+[node name="SuspRL" type="RayCast3D" parent="Susp"]
+position = Vector3(-0.93, -0.25, 1.32)
+
+[node name="SuspRR" type="RayCast3D" parent="Susp"]
+position = Vector3(0.93, -0.25, 1.32)
+
+[node name="Hardpoints" type="Node3D" parent="."]
+
+[node name="WeaponSocket_L" type="Marker3D" parent="Hardpoints"]
+position = Vector3(-0.95, 0.35, -1.1)
+
+[node name="WeaponSocket_R" type="Marker3D" parent="Hardpoints"]
+position = Vector3(0.95, 0.35, -1.1)
+
+[node name="WeaponSocket_C" type="Marker3D" parent="Hardpoints"]
+position = Vector3(0, 0.55, -0.75)
+
+[node name="BoostFX_Rear" type="Marker3D" parent="Hardpoints"]
+position = Vector3(0, 0.1, 1.85)

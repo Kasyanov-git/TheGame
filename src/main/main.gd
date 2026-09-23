@@ -18,4 +18,7 @@ func _ready() -> void:
 		var gun_scene := load("res://src/combat/weapon_cannon.tscn") as PackedScene
 		if gun_scene != null:
 			car.mount_weapon(gun_scene.instantiate() as Node3D)
+	var nm := get_node_or_null("/root/NetworkManager")
+	if nm != null and car != null:
+		nm.call("bind", car, self)     # set-up сети активен только с флагом --net
 	get_window().title = "Overdrive Arena — Sprint 2 (WASD · Space буст · Shift дрифт · ЛКМ/F огонь · R сброс)"

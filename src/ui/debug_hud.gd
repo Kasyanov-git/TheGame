@@ -62,6 +62,14 @@ func _status_text() -> String:
 			parts.append("DESTROYED")
 		elif h.shield_time_left > 0.0:
 			parts.append("SHIELD %.1fs" % h.shield_time_left)
+	var nm := get_node_or_null("/root/NetworkManager")
+	if nm != null and nm.get("active"):
+		var snap: Dictionary = nm.call("snapshot")
+		parts.append("NET %s · %s · ⏱%.0fs" % [
+			String(nm.get("status_line")),
+			String(snap.get("ms", "?")),
+			float(snap.get("gt", 0.0)),
+		])
 	return "  ·  ".join(parts)
 
 

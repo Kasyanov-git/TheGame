@@ -35,6 +35,8 @@ signal revived
 var current_health := 100.0
 var is_dead := false
 var shield_time_left := 0.0
+
+@export var net_mode := false   ## сеть: урон наносит только сервер (set_net_hp)
 var last_attacker_id := ""                 ## кил-фид: кто добил
 
 var _body: Node3D
@@ -71,6 +73,8 @@ func _physics_process(delta: float) -> void:
 ## Урон по компоненту. Возвращает true, если HP реально изменились
 ## (false — щит поглотил / уже мертв / урона нет).
 func take_damage(amount: float, attacker_id: String = "") -> bool:
+	if net_mode:
+		return false          # авторитет сервера (Sprint 3): локальный урон выключен
 	if is_dead or amount <= 0.0:
 		return false
 	if shield_time_left > 0.0:
@@ -109,6 +113,20 @@ func is_alive() -> bool:
 
 
 ## Полный сброс (отладка/спецрежимы).
+## Сеть (Sprint 3): снапшот BattleState — единственный источник истины по hp.
+func set_net_hp(v: float) -> void:
+	var nv := clampf(v, 0.0, max_health)
+	if is_equal_approx(nv, current_health):
+		return
+	current_health = nv
+	is_dead = current_health <= 0.0
+	health_changed.emit(current_health, max_health)
+
+
+func set_net_shield(t: float) -> void:
+	shield_time_left = maxf(0.0, t)
+
+
 func reset_health() -> void:
 	is_dead = false
 	_respawn_pending = false

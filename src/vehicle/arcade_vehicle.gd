@@ -562,6 +562,12 @@ func get_weapons() -> Array:
 	return _weapons
 
 
+## Сеть (Sprint 3): мягкий возврат клиента на серверную позицию (rubber-band).
+func teleport_net(pos: Vector3, yaw: float) -> void:
+	global_position = pos
+	rotation = Vector3(0.0, yaw, 0.0)
+
+
 func get_health() -> Node:
 	return _health
 

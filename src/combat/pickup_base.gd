@@ -23,6 +23,7 @@ const VEHICLES_LAYER := 2
 
 @export var type: PickupType = PickupType.NITRO
 @export var cooldown := 10.0            ## ТЗ: 10.0 с
+@export var net_mode := false           ## сеть: эффект и cd диктует сервер (set_net_cd)
 @export var repair_amount := 35.0       ## ТЗ: +35 HP
 @export var shield_duration := 6.0      ## ТЗ: 6 с
 @export var icon_spin := 1.6            ## рад/с
@@ -57,13 +58,26 @@ func _process(delta: float) -> void:
 		_icon.position.y = 1.15 + sin(_time * 2.3) * 0.12
 	if not ready_for_pickup:
 		_cd_t -= delta
-		if _cd_t <= 0.0:
+		if _cd_t <= 0.0 and not net_mode:
 			_set_ready(true)
 
 
 ## Публичный API для спавнеров/режимов (Sprint 3: нейтральные точки захвата и т.п.)
 func begin_cooldown() -> void:
 	_set_ready(false)
+
+
+## Сеть: кулдаун из снапшота (BattleRoom.pickup cd). ready_for_pickup — тоже он.
+func set_net_cd(sec: float) -> void:
+	if not net_mode:
+		return
+	_cd_t = maxf(0.0, sec)
+	var r := _cd_t <= 0.0
+	if r != ready_for_pickup:
+		ready_for_pickup = r
+		if _shape_node != null:
+			_shape_node.set_deferred("disabled", not r)
+		_refresh_look()
 
 
 func force_ready() -> void:
@@ -73,6 +87,8 @@ func force_ready() -> void:
 # ════════════════════════ подбор ════════════════════════
 
 func _on_body_entered(body: Node) -> void:
+	if net_mode:
+		return   # сервер сам видит overlap по самоотчёту позиции — локально только «звук/вид»
 	if not ready_for_pickup:
 		return
 	if body == null or not body.is_in_group("vehicles"):

@@ -59,6 +59,14 @@ var _hp0_mg := 100.0
 var _mg_hits := 0
 var _pads := {}
 var _icon_yaw_0 := 0.0
+# sprint 3: net unit checks (offline-прогон: feed_snapshot без реального WS)
+var _nm = null
+var _net_adds := 0
+var _net_removes := 0
+var _net_state_changes := 0
+var _net_joined_ids := []
+var _fake_av = null
+var _hp_before_net := 0.0
 
 
 func _ready() -> void:
@@ -221,7 +229,11 @@ func _physics_process(_delta: float) -> void:
 				_check(absf(_ch.current_health - 40.0) < 0.01,
 					"damage applies after shield expiry (hp %.1f == 40)" % _ch.current_health)
 		968:
-			_finish()
+			_s3_net_setup()
+		973:
+			_s3_net_avatar_checks()
+		977:
+			_s3_net_finish()
 
 
 # ════════════════════════ Sprint 2: секции ════════════════════════
@@ -461,6 +473,122 @@ func _s2_shield_run() -> void:
 		_ch.take_damage(5.0, "test")  # 75 -> 70 (на кулдауне repair-площадки)
 	if _pads.has(2):
 		_teleport(_car, _pads[2].global_position + Vector3(0.0, 1.7, 0.0))
+
+
+# ════════════════════════ Sprint 3: net-юниты (оффлайн) ════════════════════
+
+## Прогоняет сетевой код клиента без реального сокета: NetworkManager доступен
+## и в сборках без websocket-модуля (wasm headless) — проверка контракта
+## снапшотов, интерполяции аватара, rubber-band и репликации hp.
+
+func _s3_net_setup() -> void:
+	_nm = get_node_or_null("/root/NetworkManager")
+	if _nm == null:
+		_check(false, "NetworkManager autoload exists")
+		_finish()
+		return
+	_check(true, "NetworkManager autoload exists")
+	_nm.connect("onPlayerAdd", _s3_net_on_add)
+	_nm.connect("onPlayerRemove", _s3_net_on_remove)
+	_nm.connect("onStateChange", _s3_net_on_state)
+	_nm.connect("onJoin", _s3_net_on_join)
+	_nm.call("bind", _car, _main)
+	# UserCommand: поля ТЗ п.2 (throttle/steering/drift/turret/isShooting/seq)
+	var cmd: Dictionary = _nm.call("_pack_input", 7)
+	_check(cmd.has("th") and cmd.has("st") and cmd.has("dr") and cmd.has("bo")
+		and cmd.has("f") and cmd.has("ay") and cmd.has("ap") and int(cmd.get("s", -1)) == 7,
+		"UserCommand packs throttle/steer/drift/fire/turretYaw/Pitch/seq (30 Hz)")
+	_check(cmd.has("px") and cmd.has("pz") and cmd.has("ry") and cmd.has("vx") and cmd.has("vz"),
+		"UserCommand carries client-prediction self-report (px/pz/ry/vx/vz)")
+	# yaw-интерполяция через ±π без прыжка
+	var na = load("res://src/net/net_avatar.gd")
+	var wrapped: float = na.call("lerpf_angle", 3.0, -3.0, 0.5)
+	_check(absf(wrapped) <= PI + 0.01, "lerpf_angle wraps through ±π (mid = %.3f)" % wrapped)
+	# join() без модуля WS не должен падать; с модулем — connecting
+	_nm.call("join", "ws://127.0.0.1:1")
+	var st := String(_nm.get("status_line"))
+	_check(st == "no websocket module" or st == "connecting…",
+		"join() safe without WS module (status: %s)" % st)
+	_nm.call("leave")
+	# снапшот с чужим игроком => onPlayerAdd + аватар
+	_nm.set("local_sid", "self")
+	var snap := {
+		"t": "st", "ms": "PLAYING", "gt": 100.0,
+		"pl": [["self", 0.0, 0.0, 0.0, 77.0, 3.0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+			["fake", 5.0, -3.0, 0.5, 40.0, 2.0, 1, 0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]],
+		"pk": [], "pr": [],
+	}
+	_nm.call("_feed_snapshot", snap)
+	_check(_net_adds == 1, "snapshot spawns remote avatar (onPlayerAdd)")
+	_fake_av = _nm.get("_avatars").get("fake")
+	_check(_fake_av != null, "avatar node created for remote player")
+	# свой hp реплицируется сервером
+	var h = _car.get_node("Health")
+	_hp_before_net = h.current_health
+	_check(absf(h.current_health - 77.0) < 0.01, "own hp replicated from snapshot (77)")
+	# net_mode: локальный take_damage игнорируется
+	h.set("net_mode", true)
+	h.take_damage(20.0, "local")
+	_check(absf(h.current_health - 77.0) < 0.01, "net_mode: local take_damage ignored (authoritative hp)")
+	# второй снапшот: «fake» сместился + убрался «self» из чужих
+	var snap2 := {
+		"t": "st", "ms": "PLAYING", "gt": 99.0,
+		"pl": [["self", 0.0, 0.0, 0.0, 60.0, 3.0, 0, 0, 2.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+			["fake", 7.0, -3.0, 0.5, 40.0, 2.0, 1, 0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]],
+		"pk": [], "pr": [],
+	}
+	_nm.call("_feed_snapshot", snap2)
+	_check(absf(h.shield_time_left - 2.5) < 0.01, "shield timer replicated (2.5s)")
+
+
+func _s3_net_avatar_checks() -> void:
+	if _fake_av == null:
+		_check(false, "avatar checks skipped — no avatar")
+		return
+	# два ключа в один тик => alpha=0.5 => позиция ровно посередине (5→7 => 6)
+	var gp: Vector3 = _fake_av.global_position
+	_check(absf(gp.x - 6.0) < 0.35 and absf(gp.z + 3.0) < 0.35,
+		"remote avatar interpolated between keys (x=%.2f ∈ [5..7])" % gp.x)
+	var fh = _fake_av.vehicle.get_node_or_null("Health")
+	_check(fh != null and absf(fh.current_health - 40.0) < 0.01,
+		"remote avatar hp driven by snapshot (40)")
+	# rubber-band: далёкий rec телепортит, близкий — нет
+	_nm.call("_rubber_band", {"x": 20.0, "z": 20.0, "rotY": 1.2})
+	var p1: Vector3 = _car.global_position
+	_check(p1.distance_to(Vector3(20.0, p1.y, 20.0)) < 1.0, "rubber-band snaps client >4m off")
+	_nm.call("_rubber_band", {"x": p1.x + 0.5, "z": p1.z, "rotY": 1.2})
+	_check(_car.global_position.is_equal_approx(Vector3(p1.x + 0.5, p1.y, p1.z)) == false,
+		"small reconcile ignored (prediction trusted)")
+	# remove player => onPlayerRemove
+	_nm.call("_feed_snapshot", {"t": "st", "ms": "PLAYING", "gt": 98.0,
+		"pl": [["self", 0.0, 0.0, 0.0, 60.0, 3.0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+		"pk": [], "pr": []})
+	_check(_net_removes == 1 and _net_state_changes >= 3,
+		"player removal propagates (onPlayerRemove + onStateChange x%d)" % _net_state_changes)
+
+
+func _s3_net_finish() -> void:
+	var h = _car.get_node("Health")
+	h.set("net_mode", false)
+	h.reset_health()
+	_check(_net_joined_ids.size() == 0, "no fake onJoin spam offline")
+	_finish()
+
+
+func _s3_net_on_add(id) -> void:
+	_net_adds += 1
+
+
+func _s3_net_on_remove(id) -> void:
+	_net_removes += 1
+
+
+func _s3_net_on_state(_s) -> void:
+	_net_state_changes += 1
+
+
+func _s3_net_on_join(id) -> void:
+	_net_joined_ids.append(String(id))
 
 
 # ════════════════════════ утилиты ════════════════════════

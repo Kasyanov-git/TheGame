@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<!--
+  Overdrive Arena — web-demo (Sprint 3, ТЗ DoD 1b)
+  Полноценный Colyseus-клиент против BattleRoom: тот же авторитарный сервер,
+  что и для Godot (relay) и для smoke-тестов. Открой ДВА ОКНА — движение и
+  стрельба синхронизируются без телепортов (client-side prediction 30 Гц +
+  интерполяция чужих машин с буфером 100 мс).
+
+  Запуск: любой static-хостинг рядом со сервером (:2567). URL-параметры:
+    ?name=Vasya · ?weapon=mg|cannon · ?url=ws://host:2567 (вручную)
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overdrive Arena — web demo (Sprint 3)</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b0f14;font:14px/1.4 system-ui,monospace;color:#cfe3ff}
+  canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none}
+  .panel{position:absolute;background:#101823cc;border:1px solid #2c4258;border-radius:8px;padding:8px 12px}
+  #scores{top:12px;right:12px;min-width:210px;border-collapse:initial}
+  #scores td{padding:1px 6px}
+  .me{color:#7fd0ff}.bot{color:#8a9bb3}
+  #top{top:12px;left:50%;transform:translateX(-50%);text-align:center;font-size:16px;white-space:nowrap}
+  #help{bottom:12px;left:12px;font-size:12px;opacity:.85}
+  #pickups{bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px;padding:7px 12px}
+  .pk{width:16px;height:16px;border-radius:4px;position:relative;overflow:hidden;background:#33445566}
+  .pk i{position:absolute;inset:0;transform-origin:bottom;display:block}
+  #log{bottom:12px;right:12px;max-width:340px;font-size:12px;opacity:.9}
+  #log div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #hpbar{width:200px;height:9px;background:#223344;border-radius:5px;overflow:hidden;display:inline-block;vertical-align:middle}
+  #hpbar i{display:block;height:100%;background:#43d67c;transition:width .2s}
+  #join{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0f14e6;z-index:5}
+  #join button{pointer-events:auto;font:16px system-ui;padding:10px 22px;margin:6px;border-radius:8px;border:1px solid #3d5c78;background:#16232f;color:#cfe3ff;cursor:pointer}
+  #join button:hover{background:#1e3247}
+</style>
+</head>
+<body>
+<div id="join"><div style="text-align:center">
+  <div style="font-size:22px;margin-bottom:8px">⚡ Overdrive Arena — Sprint 3 web-demo</div>
+  <div id="jstatus" style="margin-bottom:14px;color:#8a9bb3">Colyseus BattleRoom · матчмейкинг 5 с → комнату добьют боты (до 4 машин)</div>
+  <br>
+  <button id="btnCannon">В бой · пушка (cannon)</button>
+  <button id="btnMG">В бой · пулемёт (MG)</button>
+</div></div>
+<div id="hud">
+  <div class="panel" id="top"><span id="mstate">…</span> · ⏱ <span id="timer">0</span> с · <span id="hpbar"><i></i></span> <span id="hptext"></span></div>
+  <table class="panel" id="scores"></table>
+  <div class="panel" id="pickups"></div>
+  <div class="panel" id="log"></div>
+  <div class="panel" id="help">WASD/arrows — газ/руль · мышь — турель · ЛКМ/Space — огонь · Shift — дрифт · R — сброс · <b>открой второе окно</b></div>
+</div>
+<script type="module">
+import * as THREE from "https://esm.sh/three@0.169.0";
+import { Client } from "https://esm.sh/@colyseus/sdk@0.18.4";
+
+/* зеркала server/src/arena.ts — одна физика на клиента и сервер (prediction) */
+const MAX_SPEED = 45, ACCEL = 13.3, REVERSE_MAX = 12, BRAKE = 20, DRAG = 1.2;
+const WHEELBASE = 2.7, STEER_LIMIT = 0.6109, STEER_KEEP = 0.35;
+const FLOOR_A = 52, FLOOR_B = 36, CAR_Y = 1.19;
+const INTERP_DELAY = 0.10, INPUT_HZ = 30;
+const PICKUP_COLORS = [0x39e639, 0x38b6ff, 0xffd23e];   // repair / nitro / shield
+
+function serverURL() {
+  const p = new URLSearchParams(location.search).get("url");
+  if (p) return p;
+  const host = location.hostname;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  if (host === "localhost" || host === "127.0.0.1") return `${proto}://${host}:2567`;
+  return `${proto}://${host.replace(/^\d+-/, "2567-")}`;   // e2b-preview: 8080-xxx → 2567-xxx
+}
+
+/* ────────────────────────── сцена ────────────────────────── */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+document.body.prepend(renderer.domElement);
+function onResize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0f14);
+scene.fog = new THREE.Fog(0x0b0f14, 110, 240);
+const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.1, 500);
+addEventListener("resize", onResize); onResize();
+scene.add(new THREE.HemisphereLight(0x99bbff, 0x0a1420, 1.15));
+const sun = new THREE.DirectionalLight(0xfff2d0, 1.7); sun.position.set(40, 80, 25); scene.add(sun);
+
+const floor = new THREE.Mesh(new THREE.CircleGeometry(1, 64),
+  new THREE.MeshLambertMaterial({ color: 0x17324a }));
+floor.scale.set(FLOOR_A, FLOOR_B, 1); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+const rim = new THREE.Mesh(new THREE.TorusGeometry(1, 0.55, 8, 80),
+  new THREE.MeshLambertMaterial({ color: 0x2f5f8a }));
+rim.scale.set(FLOOR_A, FLOOR_B, 1); rim.rotation.x = -Math.PI / 2; rim.position.y = 1.3; scene.add(rim);
+for (const [sx, sz] of [[0, 27], [0, -27], [-26, 0], [26, 0], [0, 0]]) {
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 0.35, 10),
+    new THREE.MeshLambertMaterial({ color: 0x24486b }));
+  pad.position.set(sx, 0.17, sz); scene.add(pad);
+}
+
+const carMesh = (color) => {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.8, 4.2),
+    new THREE.MeshLambertMaterial({ color }));
+  body.position.y = 0.75; g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.6, 1.7),
+    new THREE.MeshLambertMaterial({ color: 0x15222f }));
+  cabin.position.set(0, 1.35, 0.35); g.add(cabin);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 2.4),
+    new THREE.MeshLambertMaterial({ color: 0x324a63 }));
+  barrel.position.set(0, 1.2, -2.0); g.add(barrel);
+  g.userData.barrel = barrel;
+  for (const [wx, wz] of [[-1.05, -1.35], [1.05, -1.35], [-1.05, 1.45], [1.05, 1.45]]) {
+    const w = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.72, 1.0),
+      new THREE.MeshLambertMaterial({ color: 0x0c1117 }));
+    w.position.set(wx, 0.42, wz); g.add(w);
+  }
+  return g;
+};
+const projMesh = () => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffd766 }));
+  return m;
+};
+
+/* ────────────────────────── ввод ────────────────────────── */
+const keys = {};
+addEventListener("keydown", (e) => { keys[e.code] = true; if (["Space", "ArrowUp", "ArrowDown"].includes(e.code)) e.preventDefault(); });
+addEventListener("keyup", (e) => { keys[e.code] = false; });
+let aimYaw = 0, aimPitch = 0, firing = false;
+addEventListener("mousemove", (e) => {
+  if (!room) return;
+  aimYaw = wrap(aimYaw + e.movementX * 0.0026);
+  aimPitch = clamp(aimPitch + e.movementY * 0.0016, PITCH_MIN(), PITCH_MAX);
+});
+addEventListener("mousedown", (e) => { if (e.button === 0) firing = true; });
+addEventListener("mouseup", (e) => { if (e.button === 0) firing = false; });
+const PITCH_MIN = () => -10 * Math.PI / 180, PITCH_MAX = 30 * Math.PI / 180;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap = (a) => { a = (a + Math.PI) % (Math.PI * 2); return a < 0 ? a + Math.PI : a - Math.PI; };
+const wrapd = (a, b) => wrap(b - a);
+
+/* ── клиентская модель машины = зеркало server/sim.stepPlayer (prediction) ── */
+const me = { x: 0, z: 20, yaw: Math.PI, v: 0, boostT: 0, hp: 100, live: false };
+
+function stepMe(dt) {
+  if (!me.live) return;
+  const th = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+  const st = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  const nitro = me.boostT > 0 ? 1.5 : 1.0;
+  const vCap = MAX_SPEED * nitro;
+  if (th > 0.02) me.v += ACCEL * th * nitro * dt;
+  else if (th < -0.02) me.v = me.v > 0.5 ? me.v - BRAKE * dt : Math.max(me.v - ACCEL * 0.6 * dt, -REVERSE_MAX);
+  else me.v -= Math.sign(me.v) * Math.min(Math.abs(me.v), DRAG * me.v * dt + 2.0 * dt);
+  me.v = clamp(me.v, -REVERSE_MAX, vCap);
+  const frac = Math.min(1, Math.abs(me.v) / MAX_SPEED);
+  const delta = st * STEER_LIMIT * (1 - (1 - STEER_KEEP) * frac);
+  me.yaw = wrap(me.yaw + (me.v / WHEELBASE) * Math.tan(delta) * dt);
+  me.x += -Math.sin(me.yaw) * me.v * dt;
+  me.z += -Math.cos(me.yaw) * me.v * dt;
+  const rr = (me.x / FLOOR_A) ** 2 + (me.z / FLOOR_B) ** 2;    // clampToArena (эллипс)
+  if (rr > 1) { const k = 1 / Math.sqrt(rr); me.x *= k; me.z *= k; me.v *= 0.4; }
+  me.boostT = Math.max(0, me.boostT - dt);
+  if (keys.KeyR) { me.x = 0; me.z = 20; me.yaw = Math.PI; me.v = 0; }
+}
+
+/* ────────────────────────── сеть ────────────────────────── */
+let room = null, input = null, mySid = "";
+const avatars = new Map();     // sid -> { group, buf:[], hp, dead }
+const projectiles = new Map(); // pid -> mesh
+const logEl = document.getElementById("log");
+const say = (t) => { const d = document.createElement("div"); d.textContent = t; logEl.prepend(d); while (logEl.children.length > 7) logEl.lastChild.remove(); };
+
+document.getElementById("btnCannon").onclick = () => joinGame("cannon");
+document.getElementById("btnMG").onclick = () => joinGame("mg");
+
+async function joinGame(weapon) {
+  const qs = new URLSearchParams(location.search);
+  const name = qs.get("name") || ("web-" + Math.floor(Math.random() * 900 + 100));
+  document.getElementById("jstatus").textContent = "подключение к " + serverURL() + " …";
+  const client = new Client(serverURL());
+  try {
+    room = await client.joinOrCreate("battle", { name, weapon });
+  } catch (e) {
+    document.getElementById("jstatus").textContent = "сервер недоступен: " + e.message + " (запусти `npm run start` в server/)";
+    return;
+  }
+  mySid = room.sessionId;
+  input = room.input();
+  me.live = true;
+  document.getElementById("join").style.display = "none";
+  document.title = `Arena · ${name}`;
+  say(`ты: ${name} (${mySid.slice(0, 6)}) · ${weapon}`);
+
+  room.onMessage("ev", (m) => onEvent(m));
+  room.onMessage("reconcile", (a) => {        // сервер отверг самоотчёт — rubber-band
+    me.x = a.x; me.z = a.z; me.yaw = a.rotY ?? me.yaw; me.v = 0;
+    say("⚠ reconcile: позиция возвращена сервером");
+  });
+  room.onStateChange((state) => onState(state));
+  onState(room.state);
+}
+
+const tSec = () => performance.now() / 1000;
+function onState(state) {
+  const seen = new Set();
+  state.players.forEach((p, id) => {
+    if (id === mySid) {                          // свой hp/nitro — серверные цифры
+      me.hp = p.hp; me.boostT = p.boostT ?? me.boostT;
+      return;
+    }
+    seen.add(id);
+    let av = avatars.get(id);
+    if (!av) {
+      av = { group: carMesh(hashColor(id)), buf: [], dead: false };
+      av.group.position.y = CAR_Y;
+      scene.add(av.group); avatars.set(id, av);
+      say(`+ ${p.name || id.slice(0, 6)}${p.isBot ? " 🤖" : ""}`);
+    }
+    const dead = p.hp <= 0;
+    if (dead !== av.dead) { av.group.visible = !dead; av.dead = dead; }
+    av.name = p.name || id.slice(0, 6); av.score = p.score; av.hp = p.hp; av.bot = !!p.isBot;
+    av.buf.push({ t: tSec(), x: p.x, z: p.z, yaw: p.rotY, ay: p.aimYaw ?? 0, ap: p.aimPitch ?? 0 });
+    while (av.buf.length > 12) av.buf.shift();
+  });
+  for (const [id, av] of avatars) if (!seen.has(id)) { scene.remove(av.group); avatars.delete(id); say(`- ${av.name || id.slice(0, 6)}`); }
+  state.projectiles.forEach((q, pid) => {
+    let m = projectiles.get(pid);
+    if (!m) { m = projMesh(); scene.add(m); projectiles.set(pid, m); }
+    m.position.set(q.x, q.y, q.z);
+    m.userData.seen = true;
+  });
+  for (const [pid, m] of projectiles) { if (m.userData.seen) m.userData.seen = false; else { scene.remove(m); projectiles.delete(pid); } }
+  renderPickups(state);
+  renderScores(state);
+  document.getElementById("mstate").textContent = state.matchState;
+  document.getElementById("timer").textContent = Math.max(0, Math.ceil(state.gameTimer));
+}
+
+function renderScores(state) {
+  const rows = [];
+  state.players.forEach((p, id) => rows.push({ id, n: p.name || id.slice(0, 6), hp: p.hp, sc: p.score, bot: !!p.isBot, me: id === mySid }));
+  rows.sort((a, b) => b.sc - a.sc);
+  document.getElementById("scores").innerHTML =
+    `<tr><td><b>score</b></td><td><b>hp</b></td><td><b>кто</b></td></tr>` +
+    rows.map(r => `<tr class="${r.me ? "me" : r.bot ? "bot" : ""}"><td>${r.sc}</td><td>${Math.max(0, Math.round(r.hp))}</td><td>${r.n}${r.bot ? " 🤖" : ""}</td></tr>`).join("");
+  const mine = rows.find(r => r.me);
+  document.querySelector("#hpbar i").style.width = (mine ? Math.max(0, mine.hp) : 100) + "%";
+  document.getElementById("hptext").textContent = mine ? `${Math.max(0, Math.round(mine.hp))}` : "";
+}
+
+let pkDots = null;
+function renderPickups(state) {
+  const el = document.getElementById("pickups");
+  const arr = []; state.pickups.forEach((k) => arr.push(k));
+  if (!pkDots) { el.innerHTML = arr.map(() => `<div class="pk"><i></i></div>`).join(""); pkDots = [...el.children]; }
+  arr.forEach((k, i) => {
+    if (!pkDots[i]) return;
+    const f = clamp(1 - (k.cd || 0) / 10, 0, 1);
+    pkDots[i].firstChild.style.transform = `scaleY(${f})`;
+    pkDots[i].firstChild.style.background = "#" + PICKUP_COLORS[k.type].toString(16).padStart(6, "0");
+  });
+}
+
+function onEvent(m) {
+  const a = m.a || {};
+  if (m.e === "fire") flashMuzzle(a);
+  else if (m.e === "hit") flashHit(a.id);
+  else if (m.e === "kill") say(`💥 ${nameOf(a.killerId)} → ${nameOf(a.victimId)}`);
+  else if (m.e === "death" && a.id === mySid) say("☠ ты уничтожен · респаун 4 с");
+  else if (m.e === "spawn") { if (a.id === mySid) { me.x = a.x; me.z = a.z; me.v = 0; } }
+  else if (m.e === "pickup") say(`пикап: ${["ремонт", "нитро", "щит"][a.type] ?? a.type} · ${nameOf(a.id)}`);
+  else if (m.e === "start") say("▶ бой!");
+  else if (m.e === "finished") say(`🏁 победа: ${nameOf(a.winner)}`);
+}
+const nameOf = (id) => id === mySid ? "ты" : (avatars.get(id)?.name || String(id).slice(0, 6) || "?");
+const hashColor = (id) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return new THREE.Color().setHSL((h % 360) / 360, 0.55, 0.55); };
+
+let flashTimers = new Map();
+function flashMuzzle(a) {
+  const av = avatars.get(a.id); if (!av || av.dead) return;
+  const fl = new THREE.Mesh(new THREE.SphereGeometry(0.7, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffe28a }));
+  fl.position.copy(av.group.position).add(new THREE.Vector3(0, 1.2, 0));
+  scene.add(fl); setTimeout(() => scene.remove(fl), 90);
+}
+function flashHit(id) {
+  const av = avatars.get(id); if (!av) return;
+  av.group.traverse(o => o.material && o.material.color && o.material.emissive?.setHex(0x661111));
+  clearTimeout(flashTimers.get(id));
+  flashTimers.set(id, setTimeout(() => av.group.traverse(o => o.material?.emissive?.setHex(0)), 130));
+}
+
+/* ── главный цикл: интерполяция чужих + prediction + отправка UserCommand ── */
+let last = performance.now(), sendAcc = 0;
+function tick(now) {
+  requestAnimationFrame(tick);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (me.live) {
+    stepMe(dt);
+    if (input) {
+      sendAcc += dt;
+      const step = 1 / INPUT_HZ;
+      while (sendAcc >= step) {
+        sendAcc -= step;
+        const d = input.data;
+        d.throttle = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+        d.steer = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+        d.drift = !!keys.ShiftLeft || !!keys.ShiftRight;
+        d.boost = false;                                  // нитро — только с пикапов (как на сервере)
+        d.fire = firing || !!keys.Space;
+        d.aimYaw = aimYaw; d.aimPitch = aimPitch;
+        d.rx = me.x; d.rz = me.z; d.ry = me.yaw;
+        input.send();
+      }
+    }
+    /* своя машина — предсказание; баррель поворачиваем к прицелу */
+    const g = myMesh();
+    g.position.set(me.x, CAR_Y, me.z);
+    g.rotation.y = me.yaw;
+    g.userData.barrel.rotation.y = clamp(wrapd(me.yaw, aimYaw), -0.75, 0.75);
+    g.visible = me.hp > 0;
+    /* камера-погоня */
+    const back = new THREE.Vector3(Math.sin(me.yaw), 0, Math.cos(me.yaw)).multiplyScalar(15);
+    camera.position.lerp(new THREE.Vector3(me.x + back.x, 10.5, me.z + back.z), 1 - Math.exp(-dt * 5));
+    camera.lookAt(me.x, 1.5, me.z);
+  }
+  /* чужие — интерполяция с буфером 100 мс (ТЗ п.2) */
+  const renderT = tSec() - INTERP_DELAY;
+  for (const av of avatars.values()) {
+    const b = av.buf; if (b.length < 2) continue;
+    let i = 0; while (i < b.length - 2 && b[i + 1].t < renderT) i++;
+    const a1 = b[i], a2 = b[i + 1];
+    const w = clamp((renderT - a1.t) / Math.max(1e-4, a2.t - a1.t), 0, 1);
+    av.group.position.x = a1.x + (a2.x - a1.x) * w;
+    av.group.position.z = a1.z + (a2.z - a1.z) * w;
+    av.group.rotation.y = a1.yaw + wrapd(a1.yaw, a2.yaw) * w;   // slerp поворота вокруг ±π
+    av.group.userData.barrel.rotation.y = clamp(wrapd(av.group.rotation.y, a1.ay + wrapd(a1.ay, a2.ay) * w), -0.75, 0.75);
+  }
+  renderer.render(scene, camera);
+}
+let meMesh = null;
+function myMesh() { if (!meMesh) { meMesh = carMesh(0x53b7ff); meMesh.position.y = CAR_Y; scene.add(meMesh); } return meMesh; }
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
